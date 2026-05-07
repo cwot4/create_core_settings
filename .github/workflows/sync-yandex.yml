@@ -1,59 +1,54 @@
 name: Sync to Yandex Disk
 
-# Запускается при пуше в main/master или вручную
 on:
-  push:
-    branches: [main, master]
+  release:
+    types: [published]
   workflow_dispatch:
 
 jobs:
   sync:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      # Загружаем каждый файл на Яндекс.Диск через REST API
-      - name: Upload to Yandex Disk
+      - name: Upload release assets to Yandex Disk
         env:
           YANDEX_TOKEN: ${{ secrets.YANDEX_TOKEN }}
           YANDEX_FOLDER: core_aquila
+          GH_REPO: ${{ github.repository }}
         run: |
-          upload() {
-            local file="$1"
+          upload_url() {
+            local url="$1"
             local remote_name="$2"
+
+            echo "Downloading ${remote_name}..."
+            curl -sL "$url" -o "/tmp/${remote_name}"
+
+            if [ ! -s "/tmp/${remote_name}" ]; then
+              echo "WARN: файл пустой или не скачался: ${remote_name}"
+              return
+            fi
+
             local remote_path="disk:/${YANDEX_FOLDER}/${remote_name}"
+            echo "Uploading ${remote_name} to Yandex Disk..."
 
-            echo "Uploading ${remote_name}..."
-
-            # Получаем URL для загрузки
             href=$(curl -sf \
               -H "Authorization: OAuth ${YANDEX_TOKEN}" \
               "https://cloud-api.yandex.net/v1/disk/resources/upload?path=$(python3 -c "import urllib.parse; print(urllib.parse.quote('${remote_path}'))")&overwrite=true" \
               | python3 -c "import sys,json; print(json.load(sys.stdin)['href'])")
 
             if [ -z "$href" ]; then
-              echo "ERROR: не удалось получить URL загрузки для ${remote_name}"
-              exit 1
+              echo "ERROR: не удалось получить URL для ${remote_name}"
+              return
             fi
 
-            # Загружаем файл
             curl -sf -X PUT "$href" \
               -H "Content-Type: application/octet-stream" \
-              --data-binary "@${file}"
+              --data-binary "@/tmp/${remote_name}"
 
             echo "OK: ${remote_name}"
           }
 
-          # Загружаем файлы релиза
-          # Скачиваем из GitHub Releases и заливаем на Яндекс.Диск
-          curl -sL "https://github.com/${{ github.repository }}/releases/latest/download/Mods.json" \
-            -o /tmp/create_Mods.json
-          upload /tmp/create_Mods.json "create_Mods.json"
-
-          # CustomSkinLoader.json если есть в репозитории
-          if [ -f "CustomSkinLoader.json" ]; then
-            upload "CustomSkinLoader.json" "CustomSkinLoader.json"
-          fi
+          BASE="https://github.com/${GH_REPO}/releases/latest/download"
+          upload_url "${BASE}/options.txt" "options.txt"
+          upload_url "${BASE}/servers.dat" "servers.dat"
 
           echo "Sync complete!"
