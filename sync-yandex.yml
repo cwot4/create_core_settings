@@ -1,36 +1,34 @@
 name: Sync to Yandex Disk
 
 on:
-  push:
-    branches: [main, master]
-    paths:
-      - "options.txt"
-      - "servers.dat"
+  release:
+    types: [published]
   workflow_dispatch:
 
 jobs:
   sync:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Upload to Yandex Disk
+      - name: Upload release assets to Yandex Disk
         env:
           YANDEX_TOKEN: ${{ secrets.YANDEX_TOKEN }}
           YANDEX_FOLDER: core_aquila
+          GH_REPO: ${{ github.repository }}
         run: |
-          upload() {
-            local file="$1"
+          upload_url() {
+            local url="$1"
             local remote_name="$2"
 
-            if [ ! -f "$file" ]; then
-              echo "SKIP: файл не найден: $file"
+            echo "Downloading ${remote_name}..."
+            curl -sL "$url" -o "/tmp/${remote_name}"
+
+            if [ ! -s "/tmp/${remote_name}" ]; then
+              echo "WARN: файл пустой или не скачался: ${remote_name}"
               return
             fi
 
-            echo "Uploading ${remote_name}..."
             local remote_path="disk:/${YANDEX_FOLDER}/${remote_name}"
+            echo "Uploading ${remote_name} to Yandex Disk..."
 
             href=$(curl -sf \
               -H "Authorization: OAuth ${YANDEX_TOKEN}" \
@@ -44,12 +42,13 @@ jobs:
 
             curl -sf -X PUT "$href" \
               -H "Content-Type: application/octet-stream" \
-              --data-binary "@${file}"
+              --data-binary "@/tmp/${remote_name}"
 
             echo "OK: ${remote_name}"
           }
 
-          upload "options.txt" "options.txt"
-          upload "servers.dat" "servers.dat"
+          BASE="https://github.com/${GH_REPO}/releases/latest/download"
+          upload_url "${BASE}/options.txt" "options.txt"
+          upload_url "${BASE}/servers.dat" "servers.dat"
 
           echo "Sync complete!"
